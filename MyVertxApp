@@ -1,0 +1,128 @@
+#!/bin/bash
+
+###
+# chkconfig: 345 20 80
+# description: Vert.x application service script
+# processname: java
+###
+
+APP_ENV="production"
+APP_NAME="MyVertxApp"
+APP_VER="1.0.0-SNAPSHOT"
+
+JAVA="/usr/bin/java"
+
+RUN_USER="appuser"
+
+APPLICATION_DIR="/opt/${APP_NAME}"
+APPLICATION_JAR="${APP_NAME}-${APP_VER}-fat.jar"
+APPLICATION_ARGS="-conf application-conf-${APP_ENV}.json"
+
+VERTX_OPTS="-Dvertx.logger-delegate-factory-class-name=io.vertx.core.logging.SLF4JLogDelegateFactory"
+VERTX_OPTS="${VERTX_OPTS} -Dlogback.configurationFile=file:logback.xml"
+
+JVM_OPTS="-server"
+JVM_OPTS="${JVM_OPTS} -Xms4G"
+JVM_OPTS="${JVM_OPTS} -Xmx4G"
+JVM_OPTS="${JVM_OPTS} -XX:+UseG1GC"
+JVM_OPTS="${JVM_OPTS} -XX:G1RSetUpdatingPauseTimePercent=5"
+JVM_OPTS="${JVM_OPTS} -XX:InitiatingHeapOccupancyPercent=70"
+JVM_OPTS="${JVM_OPTS} -XX:+PrintGCDetails"
+JVM_OPTS="${JVM_OPTS} -XX:+PrintGCDateStamps"
+JVM_OPTS="${JVM_OPTS} -XX:+PrintHeapAtGC"
+JVM_OPTS="${JVM_OPTS} -XX:+PrintTenuringDistribution"
+JVM_OPTS="${JVM_OPTS} -XX:+PrintGCApplicationStoppedTime"
+JVM_OPTS="${JVM_OPTS} -XX:+PrintPromotionFailure"
+JVM_OPTS="${JVM_OPTS} -XX:PrintFLSStatistics=1"
+JVM_OPTS="${JVM_OPTS} -Xloggc:/var/log/${APP_NAME}/gc.log"
+JVM_OPTS="${JVM_OPTS} -XX:+UseGCLogFileRotation"
+JVM_OPTS="${JVM_OPTS} -XX:NumberOfGCLogFiles=10"
+JVM_OPTS="${JVM_OPTS} -XX:GCLogFileSize=10M"
+
+RUNNING_PID="${APPLICATION_DIR}"/RUNNING_PID
+
+# colors
+red='\e[0;31m'
+green='\e[0;32m'
+yellow='\e[0;33m'
+reset='\e[0m'
+
+echoRed() { echo -e "${red}$1${reset}"; }
+echoGreen() { echo -e "${green}$1${reset}"; }
+echoYellow() { echo -e "${yellow}$1${reset}"; }
+
+isrunning() {
+  if [ -f "$RUNNING_PID" ]; then
+    proc=$(cat $RUNNING_PID)
+    if /bin/ps --pid $proc 1>&2 >/dev/null
+    then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+start() {
+  if isrunning; then
+    echoYellow "${APP_NAME} application is already running"
+    return 0
+  fi
+
+  pushd $APPLICATION_DIR >/dev/null
+  su $RUN_USER -s /bin/bash -c "nohup $JAVA $JVM_OPTS $VERTX_OPTS -jar $APPLICATION_JAR $APPLICATION_ARGS >/dev/null 2>&1 & echo \$! >${RUNNING_PID}"
+  popd >/dev/null
+
+  if isrunning; then
+    echoGreen "${APP_NAME} application started"
+    exit 0
+  else
+    echoRed "${APP_NAME} application has not started - check log"
+    exit 3
+  fi
+}
+
+restart() {
+  echo "Restarting ${APP_NAME} application"
+  stop
+  start
+}
+
+stop() {
+  echoYellow "Stopping ${APP_NAME} application"
+  if isrunning; then
+    kill `cat $RUNNING_PID`
+    rm $RUNNING_PID
+  fi
+}
+
+status() {
+  if isrunning; then
+    echoGreen "${APP_NAME} application is running"
+  else
+    echoRed "${APP_NAME} application is either stopped or inaccessible"
+  fi
+}
+
+case "$1" in
+  start)
+    start
+  ;;
+  status)
+    status
+  ;;
+  stop)
+    if isrunning; then
+      stop
+      exit 0
+    else
+      echoRed "${APP_NAME} application not running"
+      exit 3
+    fi
+  ;;
+  restart)
+    restart
+  ;;
+  *)
+    echo "Usage: $0 {status|start|stop|restart}"
+    exit 1
+esac
